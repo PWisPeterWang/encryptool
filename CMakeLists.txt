@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 
 project(encryptool LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 11)
@@ -9,10 +9,14 @@ set(CMAKE_CXX_STANDARD_EXTENSION OFF)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/modules)
 
 # Find the library
-# find_package(Boost REQURIED COMPONENTS system)
+find_package(Boost REQUIRED COMPONENTS filesystem program_options)
+find_package(OpenSSL REQUIRED)
 
 # Set up the executable target
-add_executable(${PROJECT_NAME} main.cpp)
+add_executable(${PROJECT_NAME} 
+    main.cpp
+    src/encryptool.cpp
+    )
 
 # Set include dirs
 target_include_directories(${PROJECT_NAME}
@@ -24,7 +28,13 @@ target_include_directories(${PROJECT_NAME}
 )
 
 # Link to thirdparty libraries
-# target_link_libraries(${PROJECT_NAME} PRIVATE )
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+        Boost::filesystem
+        Boost::program_options
+        OpenSSL::SSL
+        OpenSSL::Crypto
+    )
 
 include(GNUInstallDirs)
 # Set up the installation 
