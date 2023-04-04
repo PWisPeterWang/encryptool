@@ -1,10 +1,23 @@
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/stacktrace.hpp>
+#include <boost/exception/all.hpp>
 #include <iostream>
 #include <encryptool.hh>
 
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
+
+static bool VerifyPath(std::string const &keypath, std::string const &inpath)
+{
+    if (!fs::exists(inpath))
+    {
+        std::cout << "File does not exist" << std::endl;
+        return false;
+    }
+
+    return true;
+}
 
 int main(int argc, const char *argv[])
 {
@@ -12,11 +25,11 @@ int main(int argc, const char *argv[])
     // clang-format off
     desc.add_options()
         ("help", "produce help message")
-        ("key", po::value<std::string>(), "path to key")
-        ("g", "generate keys")
-        ("encrypt", po::value<std::string>(), "path to file to encrypt")
-        ("decrypt", po::value<std::string>(), "path to file to decrypt")
-        ("out", po::value<std::string>()->default_value("/tmp"), "path to file to decrypt");
+        ("key,k", po::value<std::string>(), "path to key file, when generating, give path to directory; when encrypting or decrypting, give path to file ;")
+        ("generate,g", "generate key pairs and exit ;")
+        ("encrypt,e", po::value<std::string>(), "path to file to encrypt, defaults to /tmp/<infile_name>.enc ;")
+        ("decrypt,d", po::value<std::string>(), "path to file to decrypt, defaults to /tmp/<infile_name>.dec ;")
+        ("out,o", po::value<std::string>()->default_value("/tmp"), "path to output file. If not given, defaults to /tmp ;");
     // clang-format on
 
     po::variables_map vm;
@@ -47,42 +60,97 @@ int main(int argc, const char *argv[])
 
     Encryptool tool;
 
-    if (!vm.count("key"))
+    std::string outpath = vm["out"].as<std::string>();
+    std::string keypath;
+    std::string inpath;
+
+    if (vm.count("g"))
     {
-        std::cout << "No key specified" << std::endl;
+        tool.GenerateKeyPair(vm["out"].as<std::string>());
+        return 0;
+    }
+
+    if (vm.count("key") == 0)
+    {
+        std::cerr << "Key path not given" << std::endl;
         return 1;
     }
-    else
+
+    keypath = vm["key"].as<std::string>();
+    if (!fs::exists(keypath) || !fs::is_regular_file(keypath))
     {
-        if (vm.count("g"))
-            tool.GenerateKeyPair(vm["key"].as<std::string>());
-        else
-            tool.LoadKeys(vm["key"].as<std::string>());
+        std::cout << "key file: " << keypath << " does not exists" << std::endl;
+        return false;
     }
+
+    int mode = 0;
 
     if (vm.count("encrypt"))
     {
+        mode = 1;
         std::cout << "Encrypting " << vm["encrypt"].as<std::string>() << std::endl;
 
-        if (!fs::exists(vm["encrypt"].as<std::string>()))
-        {
-            std::cout << "File does not exist" << std::endl;
-            return 1;
-        }
+        inpath = vm["encrypt"].as<std::string>();
 
-        tool.EncryptFile(vm["encrypt"].as<std::string>(), vm["out"].as<std::string>());
+        if (fs::exists(outpath))
+        {
+            if (fs::is_directory(outpath))
+            {
+                outpath = outpath + "/" + fs::path(inpath).filename().string() + ".enc";
+            }
+            else
+            {
+                ERR("output file already exists");
+            }
+        }
     }
     else if (vm.count("decrypt"))
     {
+        mode = 2;
         std::cout << "Decrypting " << vm["decrypt"].as<std::string>() << std::endl;
+        inpath = vm["decrypt"].as<std::string>();
 
-        if (!fs::exists(vm["decrypt"].as<std::string>()))
+        if (fs::exists(outpath))
         {
-            std::cout << "File does not exist" << std::endl;
-            return 1;
+            if (fs::is_directory(outpath))
+            {
+                outpath = outpath + "/" + fs::path(inpath).filename().string() + ".dec";
+            }
+            else
+            {
+                ERR("output file already exists");
+            }
         }
+    }
 
-        tool.DecryptFile(vm["decrypt"].as<std::string>(), vm["out"].as<std::string>());
+    if (mode == 0)
+    {
+        std::cout << "No mode <encrypt/decrypt> given" << std::endl;
+        return 1;
+    }
+
+    try
+    {
+        if (mode == 1)
+        {
+
+            tool.EncryptFile(keypath, inpath, outpath);
+        }
+        else
+        {
+
+            tool.DecryptFile(keypath, inpath, outpath);
+        }
+    }
+    catch (std::exception const &e)
+    {
+        std::cerr << e.what() << '\n';
+        const boost::stacktrace::stacktrace *st = boost::get_error_info<traced>(e);
+        if (st)
+        {
+            std::cerr << *st << '\n';
+        }
+        return 1;
     }
 
     return 0;

@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_EXTENSION OFF)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/modules)
 
 # Find the library
-find_package(Boost REQUIRED COMPONENTS filesystem program_options)
+find_package(Boost REQUIRED COMPONENTS filesystem program_options stacktrace_backtrace)
 find_package(OpenSSL REQUIRED)
 
 # Set up the executable target
@@ -27,13 +27,19 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/src
 )
 
+target_link_options(${PROJECT_NAME}
+    PRIVATE
+        -rdynamic)
+
 # Link to thirdparty libraries
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
         Boost::filesystem
         Boost::program_options
+        Boost::stacktrace_backtrace
         OpenSSL::SSL
         OpenSSL::Crypto
+        dl
     )
 
 include(GNUInstallDirs)

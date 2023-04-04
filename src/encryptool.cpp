@@ -1,166 +1,280 @@
 #include "encryptool.hh"
-#include <openssl/rsa.h>
-#include <openssl/bio.h>
-#include <openssl/pem.h>
+#include <openssl/err.h>
 #include <cassert>
+#include <iostream>
 #include <boost/filesystem.hpp>
 
 namespace fs = boost::filesystem;
 
-Encryptool::Encryptool()
-{}
-
-void Encryptool::LoadKeys(std::string const &keypath)
+void Encryptool::LoadKey(std::string const &keypath)
 {
-    if (!fs::exists(keypath) || !fs::is_directory(keypath))
-    {
-        throw std::runtime_error("Key file does not exist");
-    }
-
-    for (auto &p : fs::directory_iterator(keypath))
-    {
-        if (p.path().extension() == ".pub")
-        {
-            LoadPubKey(p.path().string());
-        }
-        else if (p.path().extension() == ".priv")
-        {
-            LoadPrivKey(p.path().string());
-        }
-    }
-
-    if (m_priv_key.empty() || m_pub_key.empty())
-    {
-        throw std::runtime_error("Key file does not exist");
-    }
+    m_rsa_key = ReadBIO(keypath);
+    std::cout << "Using key: " << keypath << std::endl;
 }
 
-void Encryptool::LoadPrivKey(std::string const &keypath)
+static void PrintFile(std::string const &path)
 {
-    BIO *key = BIO_new_file(keypath.c_str(), "r");
-    RSA *rsa = PEM_read_bio_RSAPrivateKey(key, NULL, NULL, NULL);
-    BIO_free_all(key);
+    std::vector<char> linebuf(1024);
+    Encryptool::fileptr pubkey(fopen(path.c_str(), "rb"));
 
-    if (rsa == NULL)
+    std::cout << "Public key:\n";
+    while (fgets(linebuf.data(), linebuf.size(), pubkey.get()) != nullptr)
     {
-        throw std::runtime_error("Could not load private key");
+        std::cout << linebuf.data();
     }
-
-    int keylen = RSA_size(rsa);
-    m_priv_key.resize(keylen);
-    RSA_private_encrypt(keylen, (unsigned char *)rsa, (unsigned char *)m_priv_key.data(), rsa, RSA_PKCS1_PADDING);
-    RSA_free(rsa);
-}
-
-void Encryptool::LoadPubKey(std::string const &keypath)
-{
-    BIO *key = BIO_new_file(keypath.c_str(), "r");
-    RSA *rsa = PEM_read_bio_RSAPublicKey(key, NULL, NULL, NULL);
-    BIO_free_all(key);
-
-    if (rsa == NULL)
-    {
-        throw std::runtime_error("Could not load public key");
-    }
-
-    int keylen = RSA_size(rsa);
-    m_pub_key.resize(keylen);
-    RSA_public_encrypt(keylen, (unsigned char *)rsa, (unsigned char *)m_pub_key.data(), rsa, RSA_PKCS1_PADDING);
-    RSA_free(rsa);
+    std::cout << std::endl;
 }
 
 void Encryptool::GenerateKeyPair(std::string const &keypath)
 {
-    RSA *rsa = RSA_new();
-    int ret = RSA_generate_key_ex(rsa, 2048, NULL, NULL);
+    fs::path outpath(keypath);
 
-    if (rsa == NULL)
+    if (!fs::exists(keypath))
     {
-        throw std::runtime_error("Could not generate key pair");
+        fs::create_directory(keypath);
     }
-    BIO* priv = BIO_new_file((keypath + ".priv").c_str(), "w");
-    BIO* pub = BIO_new_file((keypath + ".pub").c_str(), "w");
+    else if (fs::current_path() == outpath)
+    {
+        outpath = fs::current_path();
+    }
 
-    PEM_write_bio_RSAPublicKey(pub, rsa);
-    PEM_write_bio_RSAPrivateKey(priv, rsa, NULL, NULL, 0, NULL, NULL);
+    auto pubfile = outpath / "key.pub";
+    auto privfile = outpath / "key.priv";
 
-    BIO_free_all(pub);
-    BIO_free_all(priv);
-    RSA_free(rsa);
+    if (fs::exists(pubfile))
+    {
+        ERR("pubic key file already exists");
+    }
+
+    if (fs::exists(privfile))
+    {
+        ERR("private key file already exists");
+    }
+
+    GenerateKeyPairImpl(pubfile.string(), privfile.string());
+
+    PrintFile(pubfile.string());
+    PrintFile(privfile.string());
 }
 
-void Encryptool::EncryptFile(std::string const &inpath, std::string const &outpath)
+std::unique_ptr<BIO, Encryptool::BIODeleter> Encryptool::ReadBIO(std::string const &filename)
 {
-    assert(!m_pub_key.empty());
-    FILE* in = fopen(inpath.c_str(), "rb");
-    FILE* out = fopen(outpath.c_str(), "wb");
-    
-    if (!in || !out)
+    if (filename.empty())
     {
-        throw std::runtime_error("Could not open files");
+        ERR("filename is empty");
     }
 
-    RSA *rsa = RSA_new();
-    BIO *key = BIO_new_mem_buf(m_pub_key.data(), m_pub_key.size());
-    rsa = PEM_read_bio_RSAPublicKey(key, NULL, NULL, NULL);
-    BIO_free_all(key);
-
-    if (rsa == NULL)
+    std::unique_ptr<BIO, BIODeleter> bio(BIO_new_file(filename.c_str(), "rb"));
+    if (bio == nullptr)
     {
-        throw std::runtime_error("Could not load public key");
+        ERR("BIO_new_file read failed");
     }
 
-    int keylen = RSA_size(rsa);
-    char* buffer = new char[keylen];
-    int read = 0;
-    while ((read = fread(buffer, 1, keylen - 11, in)) > 0)
-    {
-        char* outbuffer = new char[keylen];
-        RSA_public_encrypt(read, (unsigned char *)buffer, (unsigned char *)outbuffer, rsa, RSA_PKCS1_PADDING);
-        fwrite(outbuffer, 1, keylen, out);
-        delete[] outbuffer;
-    }
-
-    delete[] buffer;
-    RSA_free(rsa);
-    fclose(in);
-    fclose(out);
+    return bio;
 }
 
-void Encryptool::DecryptFile(std::string const &inpath, std::string const &outpath)
+void Encryptool::GenerateKeyPairImpl(std::string const &pub_file, std::string const &priv_file)
 {
-    assert(!m_priv_key.empty());
-    FILE* in = fopen(inpath.c_str(), "rb");
-    FILE* out = fopen(outpath.c_str(), "wb");
-
-    if (!in || !out)
+    rsaptr rsa(RSA_new());
+    if (rsa == nullptr)
     {
-        throw std::runtime_error("Could not open files");
+        ERR("RSA_new failed");
     }
 
-    RSA *rsa = RSA_new();
-    BIO *key = BIO_new_mem_buf(m_priv_key.data(), m_priv_key.size());
-    rsa = PEM_read_bio_RSAPrivateKey(key, NULL, NULL, NULL);
-    BIO_free_all(key);
+    bnptr bn(BN_new());
+    if (bn == nullptr || !BN_set_word(bn.get(), RSA_F4))
+    {
+        ERR("BN_new or BN_set_word failed");
+    }
+
+    if (!RSA_generate_key_ex(rsa.get(), kRSA_KEYLEN, bn.get(), NULL))
+    {
+        ERR("RSA_generate_key_ex failed");
+    }
+
+    // 打开公钥文件以写入
+    m_rsa_key.reset(BIO_new_file(pub_file.c_str(), "wb"));
+
+    // 将公钥转换为 PEM 格式
+    if (PEM_write_bio_RSAPublicKey(m_rsa_key.get(), rsa.get()) != 1)
+    {
+        ERR("PEM_write_bio_RSAPublicKey failed");
+    }
+
+    // 打开私钥文件以写入
+    m_rsa_key.reset(BIO_new_file(priv_file.c_str(), "wb"));
+    // 将私钥转换为 PEM 格式
+    if (PEM_write_bio_RSAPrivateKey(m_rsa_key.get(), rsa.get(), NULL, NULL, 0, NULL, NULL) == 0)
+    {
+        ERR_print_errors_fp(stderr);
+        ERR("PEM_write_bio_RSAPrivateKey failed");
+    }
+}
+
+void Encryptool::WriteFile(std::string const &path, char const *data, size_t size)
+{
+    std::unique_ptr<FILE, FileDeleter> fp(fopen(path.c_str(), "wb"));
+    if (fp == nullptr)
+    {
+        ERR("fopen failed");
+    }
+
+    if (fwrite(data, 1, size, fp.get()) != size)
+    {
+        ERR("fwrite failed");
+    }
+}
+
+void Encryptool::EncryptFile(std::string const &keypath, std::string const &inpath, std::string const &outpath)
+{
+    LoadKey(keypath);
+    assert(m_rsa_key != nullptr);
+
+    fileptr in(fopen(inpath.c_str(), "rb"));
+    if (in == nullptr)
+    {
+        char msg[1024]{};
+        snprintf(msg, sizeof(msg), "Could not open input file: %s", outpath.c_str());
+        ERR("Could not open input file");
+    }
+
+    fileptr out(fopen(outpath.c_str(), "wb"));
+    if (out == nullptr)
+    {
+        char msg[1024]{};
+        snprintf(msg, sizeof(msg), "Could not open output file: %s", outpath.c_str());
+        ERR(msg);
+    }
+
+    rsaptr rsa(PEM_read_bio_RSAPublicKey(m_rsa_key.get(), NULL, NULL, NULL));
 
     if (rsa == NULL)
     {
-        throw std::runtime_error("Could not load private key");
+        ERR("Could not load public key");
     }
 
-    int keylen = RSA_size(rsa);
-    char* buffer = new char[keylen];
-    int read = 0;
-    while ((read = fread(buffer, 1, keylen, in)) > 0)
+    int keylen = RSA_size(rsa.get());
+    assert(keylen > 11);
+    std::vector<char> buffer(keylen);
+    std::vector<char> ciphertext(keylen);
+
+    // 写入明文大小
+    size_t plaintext_size = fs::file_size(inpath);
+
+    size_t wrlen = fwrite(&plaintext_size, sizeof(plaintext_size), 1, out.get());
+
+    size_t block_size = keylen - 11;
+
+    for (size_t i = 0; i < plaintext_size; i += block_size)
     {
-        char* outbuffer = new char[keylen];
-        RSA_private_decrypt(read, (unsigned char *)buffer, (unsigned char *)outbuffer, rsa, RSA_PKCS1_PADDING);
-        fwrite(outbuffer, 1, keylen, out);
-        delete[] outbuffer;
+        size_t len = fread(buffer.data(), 1, block_size, in.get());
+        if (len <= 0)
+        {
+            break;
+        }
+        memset(ciphertext.data(), 0, keylen);
+        RSA_public_encrypt(len, (unsigned char *)buffer.data(), (unsigned char *)ciphertext.data(), rsa.get(), RSA_PKCS1_PADDING);
+
+        size_t wrlen = fwrite(ciphertext.data(), 1, keylen, out.get());
+        if (wrlen != keylen)
+        {
+            ERR("fwrite failed");
+        }
+    }
+}
+
+void Encryptool::DecryptFile(std::string const &keypath, std::string const &inpath, std::string const &outpath)
+{
+    LoadKey(keypath);
+    assert(m_rsa_key != nullptr);
+
+    fileptr in(fopen(inpath.c_str(), "rb"));
+    if (in == nullptr)
+    {
+        char msg[1024]{};
+        snprintf(msg, sizeof(msg), "Could not open input file: %s", outpath.c_str());
+        ERR("Could not open input file");
     }
 
-    delete[] buffer;
-    RSA_free(rsa);
-    fclose(in);
-    fclose(out);
+    fileptr out(fopen(outpath.c_str(), "wb"));
+
+    if (out == nullptr)
+    {
+        char msg[1024]{};
+        snprintf(msg, sizeof(msg), "Could not open output file: %s", outpath.c_str());
+        ERR(msg);
+    }
+
+    rsaptr rsa(PEM_read_bio_RSAPrivateKey(m_rsa_key.get(), NULL, NULL, NULL));
+    if (rsa == NULL)
+    {
+        ERR("Could not load private key");
+    }
+
+    int keylen = RSA_size(rsa.get());
+
+    size_t ciphertext_size = fs::file_size(inpath) - sizeof(size_t);
+
+    if (ciphertext_size == 0 || (ciphertext_size % keylen != 0))
+    {
+        ERR("ciphertext_size error");
+    }
+
+    // 读取明文大小
+    size_t plaintext_size = 0;
+    size_t rdlen = fread(&plaintext_size, sizeof(plaintext_size), 1, in.get());
+    if (rdlen != 1)
+    {
+        ERR("fread failed");
+    }
+
+    if (plaintext_size == 0 || plaintext_size > ciphertext_size)
+    {
+        ERR("plaintext_size error");
+    }
+
+    size_t decrypted_size = 0;
+    std::vector<char> buffer(keylen);
+    std::vector<char> plaintext(keylen);
+
+    for (size_t i = 0; i < ciphertext_size; i += keylen)
+    {
+        size_t len = fread(buffer.data(), 1, keylen, in.get());
+        if (len <= 0)
+        {
+            printf("read finish\n");
+            break;
+        }
+
+        size_t block_size = len;
+
+        memset(plaintext.data(), 0, block_size);
+        RSA_private_decrypt(block_size, (unsigned char *)buffer.data(), (unsigned char *)plaintext.data(), rsa.get(), RSA_PKCS1_PADDING);
+
+        if (decrypted_size + block_size == plaintext_size)
+        {
+            size_t wrlen = fwrite(plaintext.data(), 1, plaintext_size - decrypted_size, out.get());
+            if (wrlen != plaintext_size - decrypted_size)
+            {
+                ERR("fwrite failed");
+            }
+            decrypted_size += plaintext_size - decrypted_size;
+            break;
+        } // 最后一块
+        else if (decrypted_size + keylen - 11 > plaintext_size)
+        {
+            printf("decrypted_size: %zu, plaintext_size: %zu, keylen:%d\n", decrypted_size, plaintext_size, keylen);
+            ERR("decrypted_size error");
+        } // 解密出错
+        else
+        {
+            size_t wrlen = fwrite(plaintext.data(), 1, keylen - 11, out.get());
+            if (wrlen != keylen - 11)
+            {
+                ERR("fwrite failed");
+            }
+            decrypted_size += wrlen;
+        } // 正常解密
+    }
+    assert(decrypted_size == plaintext_size);
 }
