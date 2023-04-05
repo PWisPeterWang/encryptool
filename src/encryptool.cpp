@@ -2,9 +2,7 @@
 #include <openssl/err.h>
 #include <cassert>
 #include <iostream>
-#include <boost/filesystem.hpp>
-
-namespace fs = boost::filesystem;
+#include <fstream>
 
 void Encryptool::LoadKey(std::string const &keypath)
 {
@@ -14,24 +12,23 @@ void Encryptool::LoadKey(std::string const &keypath)
 
 static void PrintFile(std::string const &path)
 {
-    std::vector<char> linebuf(1024);
-    Encryptool::fileptr pubkey(fopen(path.c_str(), "rb"));
-
-    std::cout << "Public key:\n";
-    while (fgets(linebuf.data(), linebuf.size(), pubkey.get()) != nullptr)
+    std::cout << "file: " << path << ", size:" << fs::file_size(path) << std::endl;
+    std::ifstream ifs(path);
+    std::string line;
+    while (std::getline(ifs, line))
     {
-        std::cout << linebuf.data();
+        std::cout << line << std::endl;
     }
-    std::cout << std::endl;
 }
 
 void Encryptool::GenerateKeyPair(std::string const &keypath)
 {
     fs::path outpath(keypath);
 
-    if (!fs::exists(keypath))
+    if (!fs::exists(outpath))
     {
-        fs::create_directory(keypath);
+        fs::create_directory(outpath);
+        std::cout << "creating:" << fs::absolute(outpath).string() << std::endl;
     }
     else if (fs::current_path() == outpath)
     {
@@ -43,17 +40,21 @@ void Encryptool::GenerateKeyPair(std::string const &keypath)
 
     if (fs::exists(pubfile))
     {
+        std::cout << "public key file already exists, pubfile:" << fs::absolute(pubfile).string() << std::endl;
         ERR("pubic key file already exists");
     }
 
     if (fs::exists(privfile))
     {
+        std::cout << "private key file already exists, pubfile:" << fs::absolute(privfile).string() << std::endl;
         ERR("private key file already exists");
     }
 
     GenerateKeyPairImpl(pubfile.string(), privfile.string());
 
+    std::cout << "Pubkey file: " << pubfile.string() << std::endl;
     PrintFile(pubfile.string());
+    std::cout << "Private key file: " << privfile.string() << std::endl;
     PrintFile(privfile.string());
 }
 
@@ -92,23 +93,21 @@ void Encryptool::GenerateKeyPairImpl(std::string const &pub_file, std::string co
         ERR("RSA_generate_key_ex failed");
     }
 
-    // 打开公钥文件以写入
     m_rsa_key.reset(BIO_new_file(pub_file.c_str(), "wb"));
 
-    // 将公钥转换为 PEM 格式
     if (PEM_write_bio_RSAPublicKey(m_rsa_key.get(), rsa.get()) != 1)
     {
+        ERR_print_errors_fp(stderr);
         ERR("PEM_write_bio_RSAPublicKey failed");
     }
 
-    // 打开私钥文件以写入
     m_rsa_key.reset(BIO_new_file(priv_file.c_str(), "wb"));
-    // 将私钥转换为 PEM 格式
-    if (PEM_write_bio_RSAPrivateKey(m_rsa_key.get(), rsa.get(), NULL, NULL, 0, NULL, NULL) == 0)
+    if (PEM_write_bio_RSAPrivateKey(m_rsa_key.get(), rsa.get(), NULL, NULL, 0, NULL, NULL) != 1)
     {
         ERR_print_errors_fp(stderr);
         ERR("PEM_write_bio_RSAPrivateKey failed");
     }
+    BIO_flush(m_rsa_key.get());
 }
 
 void Encryptool::WriteFile(std::string const &path, char const *data, size_t size)
@@ -158,7 +157,6 @@ void Encryptool::EncryptFile(std::string const &keypath, std::string const &inpa
     std::vector<char> buffer(keylen);
     std::vector<char> ciphertext(keylen);
 
-    // 写入明文大小
     size_t plaintext_size = fs::file_size(inpath);
 
     size_t wrlen = fwrite(&plaintext_size, sizeof(plaintext_size), 1, out.get());
@@ -220,7 +218,6 @@ void Encryptool::DecryptFile(std::string const &keypath, std::string const &inpa
         ERR("ciphertext_size error");
     }
 
-    // 读取明文大小
     size_t plaintext_size = 0;
     size_t rdlen = fread(&plaintext_size, sizeof(plaintext_size), 1, in.get());
     if (rdlen != 1)
@@ -260,12 +257,12 @@ void Encryptool::DecryptFile(std::string const &keypath, std::string const &inpa
             }
             decrypted_size += plaintext_size - decrypted_size;
             break;
-        } // 最后一块
+        } // last block
         else if (decrypted_size + keylen - 11 > plaintext_size)
         {
             printf("decrypted_size: %zu, plaintext_size: %zu, keylen:%d\n", decrypted_size, plaintext_size, keylen);
             ERR("decrypted_size error");
-        } // 解密出错
+        } // decrypt error
         else
         {
             size_t wrlen = fwrite(plaintext.data(), 1, keylen - 11, out.get());
@@ -274,7 +271,7 @@ void Encryptool::DecryptFile(std::string const &keypath, std::string const &inpa
                 ERR("fwrite failed");
             }
             decrypted_size += wrlen;
-        } // 正常解密
+        } // normal block
     }
     assert(decrypted_size == plaintext_size);
 }

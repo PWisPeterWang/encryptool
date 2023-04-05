@@ -1,15 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(encryptool LANGUAGES CXX C)
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD_EXTENSION OFF)
 
 # Enable extra find_package modules
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/modules)
 
+
 # Find the library
-find_package(Boost REQUIRED COMPONENTS filesystem program_options stacktrace_backtrace)
 find_package(OpenSSL REQUIRED)
 
 # Set up the executable target
@@ -17,6 +14,26 @@ add_executable(${PROJECT_NAME}
     main.cpp
     src/encryptool.cpp
     )
+
+list(FIND CMAKE_CXX_COMPILE_FEATURES cxx_std_17 __cxx17_support)
+if (__cxx17_support)
+    message(STATUS "Using std::filesystem from c++17")
+    target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_STD_FILESYSTEM)
+    if(WIN32)
+        find_package(Boost REQUIRED COMPONENTS program_options stacktrace_windbg)
+    else()
+        find_package(Boost REQUIRED COMPONENTS program_options stacktrace_backtrace)
+    endif()
+else()
+    message(STATUS "try to use boost::filesystem")
+    target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_11)
+    if (WIN32)
+        find_package(Boost REQUIRED COMPONENTS filesystem program_options stacktrace_windbg)
+    else()
+        find_package(Boost REQUIRED COMPONENTS filesystem program_options stacktrace_backtrace)
+    endif()
+endif()
 
 # Set include dirs
 target_include_directories(${PROJECT_NAME}
@@ -34,12 +51,13 @@ target_link_options(${PROJECT_NAME}
 # Link to thirdparty libraries
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
-        Boost::filesystem
+        $<$<BOOL:${WIN32}>:Dbghelp>
+        $<$<BOOL:${WIN32}>:Boost::stacktrace_windbg>
+        $<$<BOOL:${UNIX}>:Boost::stacktrace_backtrace>
+        $<$<BOOL:${UNIX}>:dl>
         Boost::program_options
-        Boost::stacktrace_backtrace
         OpenSSL::SSL
         OpenSSL::Crypto
-        dl
     )
 
 include(GNUInstallDirs)
@@ -48,7 +66,7 @@ install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
-    INCLUDES DESTINATION include/__PROJNAME_)
+    INCLUDES DESTINATION include/encryptool)
 
 # Set up CPack
 if(UNIX)

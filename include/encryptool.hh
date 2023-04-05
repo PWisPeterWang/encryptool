@@ -10,6 +10,14 @@
 #include <boost/stacktrace.hpp>
 #include <boost/exception/all.hpp>
 
+#ifdef USE_STD_FILESYSTEM
+    #include <filesystem>
+    namespace fs = std::filesystem;
+#else
+    #include <boost/filesystem.hpp>
+    namespace fs = boost::filesystem;
+#endif
+
 using traced = boost::error_info<struct tag_stacktrace, boost::stacktrace::stacktrace>;
 
 template<class E>

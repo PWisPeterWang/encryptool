@@ -1,12 +1,10 @@
 #include <boost/program_options.hpp>
-#include <boost/filesystem.hpp>
 #include <boost/stacktrace.hpp>
 #include <boost/exception/all.hpp>
 #include <iostream>
-#include <encryptool.hh>
+#include "encryptool.hh"
 
 namespace po = boost::program_options;
-namespace fs = boost::filesystem;
 
 static bool VerifyPath(std::string const &keypath, std::string const &inpath)
 {
@@ -19,9 +17,17 @@ static bool VerifyPath(std::string const &keypath, std::string const &inpath)
     return true;
 }
 
+static void errexit(std::string const &msg)
+{
+    std::cerr << msg << std::endl;
+    exit(1);
+}
+
 int main(int argc, const char *argv[])
 {
     po::options_description desc("Allowed options");
+    fs::path temp = fs::temp_directory_path() / "key";
+    std::cout << "Temp dir: " << temp.string() << std::endl;
     // clang-format off
     desc.add_options()
         ("help", "produce help message")
@@ -29,7 +35,7 @@ int main(int argc, const char *argv[])
         ("generate,g", "generate key pairs and exit ;")
         ("encrypt,e", po::value<std::string>(), "path to file to encrypt, defaults to /tmp/<infile_name>.enc ;")
         ("decrypt,d", po::value<std::string>(), "path to file to decrypt, defaults to /tmp/<infile_name>.dec ;")
-        ("out,o", po::value<std::string>()->default_value("/tmp"), "path to output file. If not given, defaults to /tmp ;");
+        ("out,o", po::value<std::string>()->default_value(temp.string()), "path to output file. If not given, defaults to fs::temp_directory_path()/key ;");
     // clang-format on
 
     po::variables_map vm;
@@ -64,9 +70,17 @@ int main(int argc, const char *argv[])
     std::string keypath;
     std::string inpath;
 
-    if (vm.count("g"))
+    if (vm.count("generate"))
     {
-        tool.GenerateKeyPair(vm["out"].as<std::string>());
+        try
+        {
+            tool.GenerateKeyPair(vm["out"].as<std::string>());
+        }
+        catch (std::exception const &e)
+        {
+            std::cout << e.what() << std::endl;
+            return 1;
+        }
         return 0;
     }
 
@@ -80,7 +94,7 @@ int main(int argc, const char *argv[])
     if (!fs::exists(keypath) || !fs::is_regular_file(keypath))
     {
         std::cout << "key file: " << keypath << " does not exists" << std::endl;
-        return false;
+        return 1;
     }
 
     int mode = 0;
@@ -100,7 +114,7 @@ int main(int argc, const char *argv[])
             }
             else
             {
-                ERR("output file already exists");
+                errexit("output file already exists");
             }
         }
     }
@@ -118,7 +132,7 @@ int main(int argc, const char *argv[])
             }
             else
             {
-                ERR("output file already exists");
+                errexit("output file already exists");
             }
         }
     }
