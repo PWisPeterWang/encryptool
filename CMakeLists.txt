@@ -5,6 +5,7 @@ project(encryptool LANGUAGES CXX C)
 # Enable extra find_package modules
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/modules)
 
+# On Windows, it's requried that user specify vcpkg.cmake in CMAKE_TOOLCHAIN_FILE variable
 
 # Find the library
 find_package(OpenSSL REQUIRED)

@@ -31,11 +31,11 @@ int main(int argc, const char *argv[])
     // clang-format off
     desc.add_options()
         ("help", "produce help message")
-        ("key,k", po::value<std::string>(), "path to key file, when generating, give path to directory; when encrypting or decrypting, give path to file ;")
+        ("key,k", po::value<std::string>(), "path to key file, when encrypting or decrypting, give path to key file ;")
         ("generate,g", "generate key pairs and exit ;")
-        ("encrypt,e", po::value<std::string>(), "path to file to encrypt, defaults to /tmp/<infile_name>.enc ;")
-        ("decrypt,d", po::value<std::string>(), "path to file to decrypt, defaults to /tmp/<infile_name>.dec ;")
-        ("out,o", po::value<std::string>()->default_value(temp.string()), "path to output file. If not given, defaults to fs::temp_directory_path()/key ;");
+        ("encrypt,e", po::value<std::string>(), "path to file to encrypt, defaults to /tmp/<infile_name>.enc; require --key options given pubkey file;")
+        ("decrypt,d", po::value<std::string>(), "path to file to decrypt, defaults to /tmp/<infile_name>.dec; require --key options given privkey file;")
+        ("out,o", po::value<std::string>()->default_value(temp.string()), "path to output file. If not given, defaults to fs::temp_directory_path();");
     // clang-format on
 
     po::variables_map vm;
