@@ -1,8 +1,8 @@
 # encryptool
 
-`encryptool` is an easy to use encrypt/decrypt tool using rsa based on OpenSSL library.
+`encryptool` is an easy to use encrypt/decrypt tool using RSA based on OpenSSL library.
 
-The project is aimed to serve as an example of how to use Boost::program_options library and OpenSSL::crypto library.
+This project is intended as an example of how to use the Boost::program_options library and the OpenSSL::crypto library.
 
 While it does work, it's not recommended for production use.
 
