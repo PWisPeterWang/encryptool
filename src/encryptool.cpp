@@ -234,44 +234,48 @@ void Encryptool::DecryptFile(std::string const &keypath, std::string const &inpa
     std::vector<char> buffer(keylen);
     std::vector<char> plaintext(keylen);
 
-    for (size_t i = 0; i < ciphertext_size; i += keylen)
+    printf("before decrypt, ciphertext_size: %zu, plaintext_size: %zu\n", ciphertext_size, plaintext_size);
+
+    size_t written_size = 0;
+    for (; decrypted_size < ciphertext_size;)
     {
-        size_t len = fread(buffer.data(), 1, keylen, in.get());
-        if (len <= 0)
+        size_t nread = fread(buffer.data(), 1, keylen, in.get());
+        if (nread <= 0)
         {
             printf("read finish\n");
             break;
         }
+        printf("block %zu, read %zu bytes\n", decrypted_size / keylen + 1, nread);
 
-        size_t block_size = len;
+        memset(plaintext.data(), 0, nread);
+        RSA_private_decrypt(nread, (unsigned char *)buffer.data(), (unsigned char *)plaintext.data(), rsa.get(), RSA_PKCS1_PADDING);
 
-        memset(plaintext.data(), 0, block_size);
-        RSA_private_decrypt(block_size, (unsigned char *)buffer.data(), (unsigned char *)plaintext.data(), rsa.get(), RSA_PKCS1_PADDING);
-
-        if (decrypted_size + block_size == plaintext_size)
+        if (decrypted_size + nread == ciphertext_size)
         {
-            size_t wrlen = fwrite(plaintext.data(), 1, plaintext_size - decrypted_size, out.get());
-            if (wrlen != plaintext_size - decrypted_size)
+            size_t last_part = plaintext_size - written_size;
+            size_t wrlen = fwrite(plaintext.data(), 1, last_part, out.get());
+            if (wrlen != last_part)
             {
-                ERR("fwrite failed");
+                ERR("last block fwrite failed");
             }
-            decrypted_size += plaintext_size - decrypted_size;
-            break;
+            written_size += last_part;
         } // last block
-        else if (decrypted_size + keylen - 11 > plaintext_size)
+        else if (decrypted_size + nread > ciphertext_size)
         {
-            printf("decrypted_size: %zu, plaintext_size: %zu, keylen:%d\n", decrypted_size, plaintext_size, keylen);
+            printf("decrypted_size: %zu, plaintext_size: %zu, nread:%zu\n", decrypted_size, plaintext_size, nread);
             ERR("decrypted_size error");
         } // decrypt error
         else
         {
-            size_t wrlen = fwrite(plaintext.data(), 1, keylen - 11, out.get());
-            if (wrlen != keylen - 11)
+            size_t wrlen = fwrite(plaintext.data(), 1, nread - 11, out.get());
+            if (wrlen != nread - 11)
             {
-                ERR("fwrite failed");
+                ERR("normal fwrite failed");
             }
-            decrypted_size += wrlen;
+            written_size += wrlen;
         } // normal block
+
+        decrypted_size += nread;
     }
-    assert(decrypted_size == plaintext_size);
+    assert(written_size == plaintext_size);
 }
