@@ -21,6 +21,7 @@
 # Python cache
 __pycache__/
 *.pyc
+venv/
 
 # build related
 autom4te.cache/
@@ -33,3 +34,7 @@ bin/
 .DS_Store
 ehthumbs.db
 Thumbs.db
+
+*.enc
+*.dec
+key/
