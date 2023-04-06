@@ -38,3 +38,6 @@ Thumbs.db
 *.enc
 *.dec
 key/
+
+*.png
+*.bin
